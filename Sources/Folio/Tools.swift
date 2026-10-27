@@ -63,11 +63,15 @@ extension PDFAnnotation {
     /// Annotations que l'utilisateur peut sélectionner (pas les champs de formulaire ni les liens).
     var isUserSelectable: Bool { !["Widget", "Link", "Popup"].contains(kind) }
     var isMovable: Bool { ["Text", "FreeText", "Ink", "Square", "Circle", "Line", "Stamp"].contains(kind) }
-    var isResizable: Bool { ["FreeText", "Ink", "Square", "Circle", "Line", "Stamp"].contains(kind) }
+    var isResizable: Bool {
+        if self is ShapeAnnotation { return false }  // poignées dédiées
+        return ["FreeText", "Ink", "Square", "Circle", "Line", "Stamp"].contains(kind)
+    }
     var keepsAspectRatio: Bool { kind == "Ink" || kind == "Stamp" }
 
     var displayColor: NSColor {
-        kind == "FreeText" ? (fontColor ?? .black) : color.withAlphaComponent(1)
+        if let shape = self as? ShapeAnnotation { return shape.model.style.stroke.color }
+        return kind == "FreeText" ? (fontColor ?? .black) : color.withAlphaComponent(1)
     }
 }
 
@@ -77,11 +81,14 @@ final class MenuAction: NSObject {
 
     init(_ handler: @escaping () -> Void) { self.handler = handler }
 
-    @objc func perform(_ sender: Any?) { handler() }
+    @objc func runMenuAction(_ sender: Any?) {
+        DebugLog.write("menu: \((sender as? NSMenuItem)?.title ?? "?")")
+        handler()
+    }
 
     static func item(_ title: String, image: NSImage? = nil, _ handler: @escaping () -> Void) -> NSMenuItem {
         let action = MenuAction(handler)
-        let item = NSMenuItem(title: title, action: #selector(perform(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: title, action: #selector(MenuAction.runMenuAction(_:)), keyEquivalent: "")
         item.target = action
         item.representedObject = action
         item.image = image

@@ -70,6 +70,7 @@ struct TextEditSession {
     let oldText: String
     let oldFormat: TextFormat
     let oldBounds: NSRect
+    var shape: ShapeAnnotation? = nil
 }
 
 // MARK: - Barre de mise en forme flottante
@@ -80,8 +81,7 @@ final class TextFormatBar: NSVisualEffectView {
 
     private let familyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let sizePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let boldButton = NSButton(frame: .zero)
-    private let italicButton = NSButton(frame: .zero)
+    private let styleControl = NSSegmentedControl(frame: .zero)
     private let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 34, height: 22))
     private let alignControl = NSSegmentedControl(frame: .zero)
     private let fillPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -110,19 +110,16 @@ final class TextFormatBar: NSVisualEffectView {
         sizePopup.addItems(withTitles: TextFormat.sizes.map { "\(Int($0)) pt" })
         fillPopup.addItems(withTitles: TextFormat.fills.map { $0.name })
 
-        for (button, symbol, tip) in [(boldButton, "bold", "Gras (⌘B)"), (italicButton, "italic", "Italique (⌘I)")] {
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
-            button.setButtonType(.pushOnPushOff)
-            button.bezelStyle = .texturedRounded
-            button.controlSize = .small
-            button.toolTip = tip
-            button.target = self
-            button.action = #selector(changed(_:))
+        styleControl.segmentCount = 2
+        styleControl.trackingMode = .selectAny
+        styleControl.controlSize = .small
+        for (i, (symbol, tip)) in [("bold", "Gras"), ("italic", "Italique")].enumerated() {
+            styleControl.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: tip), forSegment: i)
+            styleControl.setToolTip(tip, forSegment: i)
+            styleControl.setWidth(26, forSegment: i)
         }
-        boldButton.keyEquivalent = "b"
-        boldButton.keyEquivalentModifierMask = .command
-        italicButton.keyEquivalent = "i"
-        italicButton.keyEquivalentModifierMask = .command
+        styleControl.target = self
+        styleControl.action = #selector(changed(_:))
 
         if #available(macOS 13.0, *) { colorWell.colorWellStyle = .minimal }
         colorWell.toolTip = "Couleur du texte"
@@ -139,7 +136,7 @@ final class TextFormatBar: NSVisualEffectView {
         alignControl.target = self
         alignControl.action = #selector(changed(_:))
 
-        let stack = NSStackView(views: [familyPopup, sizePopup, boldButton, italicButton, colorWell, alignControl, fillPopup])
+        let stack = NSStackView(views: [familyPopup, sizePopup, styleControl, colorWell, alignControl, fillPopup])
         stack.orientation = .horizontal
         stack.spacing = 6
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
@@ -171,9 +168,8 @@ final class TextFormatBar: NSVisualEffectView {
         }
         let nearest = TextFormat.sizes.enumerated().min { abs($0.element - f.size) < abs($1.element - f.size) }?.offset ?? 5
         sizePopup.selectItem(at: nearest)
-        boldButton.state = f.bold ? .on : .off
-        italicButton.state = f.italic ? .on : .off
-        refreshToggleTint()
+        styleControl.setSelected(f.bold, forSegment: 0)
+        styleControl.setSelected(f.italic, forSegment: 1)
         colorWell.color = f.color
         alignControl.selectedSegment = f.alignment == .center ? 1 : (f.alignment == .right ? 2 : 0)
         let fillIndex = TextFormat.fills.firstIndex { entry in
@@ -183,20 +179,13 @@ final class TextFormatBar: NSVisualEffectView {
         fillPopup.selectItem(at: fillIndex)
     }
 
-    private func refreshToggleTint() {
-        for b in [boldButton, italicButton] {
-            b.contentTintColor = b.state == .on ? .controlAccentColor : nil
-        }
-    }
-
     @objc private func changed(_ sender: Any?) {
-        refreshToggleTint()
         var f = format
         if let title = familyPopup.titleOfSelectedItem, TextFormat.families.contains(title) { f.family = title }
         let si = sizePopup.indexOfSelectedItem
         if TextFormat.sizes.indices.contains(si) { f.size = TextFormat.sizes[si] }
-        f.bold = boldButton.state == .on
-        f.italic = italicButton.state == .on
+        f.bold = styleControl.isSelected(forSegment: 0)
+        f.italic = styleControl.isSelected(forSegment: 1)
         f.color = colorWell.color.usingColorSpace(.sRGB) ?? colorWell.color
         f.alignment = [NSTextAlignment.left, .center, .right][max(0, alignControl.selectedSegment)]
         let fi = fillPopup.indexOfSelectedItem
@@ -253,7 +242,7 @@ extension FolioPDFView {
                                       oldFormat: currentTextFormat, oldBounds: a.bounds)
         if !isNew {
             a.shouldDisplay = false
-            annotationsChanged(on: page)
+            repaint(page)
         }
         let tv = NSTextView(frame: .zero)
         tv.isRichText = false
@@ -278,6 +267,47 @@ extension FolioPDFView {
         tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
     }
 
+    /// Écrire directement dans une forme (rectangle, ellipse).
+    func beginShapeTextEditing(_ shape: ShapeAnnotation, on page: PDFPage) {
+        endTextEditing()
+        select(nil)
+        currentTextFormat = shape.model.text.isEmpty ? {
+            var f = TextFormat.last
+            f.alignment = .center
+            f.fill = nil
+            return f
+        }() : shape.model.textStyle.format
+        textEditing = TextEditSession(annotation: shape, page: page, isNew: false, oldText: shape.model.text,
+                                      oldFormat: currentTextFormat, oldBounds: shape.bounds, shape: shape)
+        shape.hidesText = true
+        // Redessin forcé : sans cela PDFKit continue d'afficher l'ancien texte.
+        shape.shouldDisplay = false
+        annotationsChanged(on: page)
+        shape.shouldDisplay = true
+        repaint(page)
+        let tv = NSTextView(frame: .zero)
+        tv.isRichText = false
+        tv.allowsUndo = true
+        tv.isHorizontallyResizable = false
+        tv.isVerticallyResizable = false
+        tv.textContainer?.widthTracksTextView = false
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.focusRingType = .none
+        tv.wantsLayer = true
+        tv.layer?.borderWidth = 1
+        tv.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
+        tv.string = shape.model.text
+        textDelegate.view = self
+        tv.delegate = textDelegate
+        textEditor = tv
+        addSubview(tv)
+        styleTextEditor()
+        layoutTextEditor()
+        showFormatBar()
+        window?.makeFirstResponder(tv)
+        tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+    }
+
     func styleTextEditor() {
         guard let tv = textEditor else { return }
         let f = currentTextFormat
@@ -289,20 +319,37 @@ extension FolioPDFView {
         tv.drawsBackground = f.fill != nil
         tv.backgroundColor = f.fill ?? .clear
         tv.textContainerInset = NSSize(width: Self.renderInsetX * s, height: Self.renderInsetY * s)
+        if textEditing?.shape != nil {
+            tv.drawsBackground = false
+            tv.textContainerInset = .zero
+        }
     }
 
     func layoutTextEditor() {
         guard let tv = textEditor, let ed = textEditing,
               let container = tv.textContainer, let lm = tv.layoutManager else { return }
         let s = scaleFactor
+        if let shape = ed.shape {
+            // Texte dans une forme : cadre fixe, texte centré verticalement.
+            let inner = ShapeGeometry.textRect(shape.bounds, shape.model.style, kind: shape.model.kind)
+            let frame = convert(inner, from: ed.page)
+            container.containerSize = NSSize(width: frame.width, height: .greatestFiniteMagnitude)
+            lm.ensureLayout(for: container)
+            let used = lm.usedRect(for: container).height
+            tv.textContainerInset = NSSize(width: 0, height: max(0, (frame.height - used) / 2))
+            tv.frame = frame
+            positionFormatBar(around: convert(shape.bounds, from: ed.page))
+            return
+        }
         let font = currentTextFormat.font()
-        // Mesure avec une largeur max de 420 pt, puis ajuste le cadre au texte.
-        container.containerSize = NSSize(width: 420 * s, height: .greatestFiniteMagnitude)
-        lm.ensureLayout(for: container)
-        let used = lm.usedRect(for: container)
+        // Mesure du texte (même calcul que le rendu final), largeur max 420 pt.
         let lineHeight = lm.defaultLineHeight(for: font)
-        let textW = max(used.width / s, 24)
-        let textH = max(used.height / s, lineHeight)
+        let measured = (tv.string.isEmpty ? " " : tv.string) as NSString
+        let r = measured.boundingRect(with: NSSize(width: 420, height: 100_000),
+                                      options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font])
+        let extraLine: CGFloat = tv.string.hasSuffix("\n") ? lineHeight : 0
+        let textW = max(ceil(r.width), 24)
+        let textH = max(ceil(r.height) + extraLine, lineHeight)
         let w = ceil(textW) + 2 * Self.textPadX
         container.containerSize = NSSize(width: (w - 2 * Self.renderInsetX) * s, height: .greatestFiniteMagnitude)
         let h = ceil(textH) + 2 * Self.textPadY
@@ -323,6 +370,23 @@ extension FolioPDFView {
         textEditor = nil
         textEditing = nil
         formatBar.removeFromSuperview()
+        if let shape = ed.shape {
+            shape.hidesText = false
+            shape.shouldDisplay = false
+            annotationsChanged(on: ed.page)
+            shape.shouldDisplay = true
+            var m = shape.model
+            m.text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : text
+            m.textStyle = ShapeText(currentTextFormat)
+            if m != shape.model {
+                setShapeModel(shape, m, bounds: shape.bounds, on: ed.page, actionName: "Texte de la forme")
+            } else {
+                annotationsChanged(on: ed.page)
+            }
+            select(shape)
+            window?.makeFirstResponder(self)
+            return
+        }
         let a = ed.annotation
         let isEmpty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if ed.isNew {

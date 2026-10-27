@@ -14,10 +14,40 @@ protocol FolioPDFViewHost: AnyObject {
 /// Cadre pointillé autour de l'annotation sélectionnée (+ poignée de redimensionnement).
 final class SelectionOverlay: NSView {
     var showsHandle = false
+    var showsBox = true
+    var cornerHandles = false
+    var endpoints: [NSPoint] = []
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    private func handle(at c: NSPoint) {
+        let r = NSRect(x: c.x - 5.5, y: c.y - 5.5, width: 11, height: 11)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: r).fill()
+        NSColor.controlAccentColor.setStroke()
+        let ring = NSBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1))
+        ring.lineWidth = 2
+        ring.stroke()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        if !endpoints.isEmpty {
+            endpoints.forEach { handle(at: $0) }
+            return
+        }
+        if cornerHandles {
+            let path = NSBezierPath(rect: bounds.insetBy(dx: 6, dy: 6))
+            path.lineWidth = 1
+            let dash: [CGFloat] = [4, 3]
+            path.setLineDash(dash, count: 2, phase: 0)
+            NSColor.controlAccentColor.setStroke()
+            path.stroke()
+            let r = bounds.insetBy(dx: 6, dy: 6)
+            for c in [NSPoint(x: r.minX, y: r.minY), NSPoint(x: r.maxX, y: r.minY), NSPoint(x: r.minX, y: r.maxY), NSPoint(x: r.maxX, y: r.maxY)] {
+                handle(at: c)
+            }
+            return
+        }
         let path = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
         path.lineWidth = 1.5
         let dash: [CGFloat] = [4, 3]
@@ -48,6 +78,7 @@ final class FolioPDFView: PDFView {
         didSet {
             if oldValue != tool { endTextEditing() }
             if tool != .select, selectedAnnotation != nil { selectedAnnotation = nil }
+            refreshOverlay()
         }
     }
     var color: NSColor = .black
@@ -60,6 +91,8 @@ final class FolioPDFView: PDFView {
     var textEditing: TextEditSession?
     let formatBar = TextFormatBar()
     let textDelegate = TextEditorDelegate()
+    let shapeBar = ShapeFormatBar()
+    private var shiftDown = false
     var currentTextFormat = TextFormat.last
 
     private(set) var selectedAnnotation: PDFAnnotation? {
@@ -74,6 +107,8 @@ final class FolioPDFView: PDFView {
         case move(PDFAnnotation, PDFPage, start: NSPoint, original: NSRect)
         case resize(PDFAnnotation, PDFPage, original: NSRect)
         case shape(PDFPage, points: [NSPoint], preview: PDFAnnotation?)
+        case endpoint(ShapeAnnotation, PDFPage, index: Int, oldModel: ShapeModel, oldBounds: NSRect, original: [CGPoint])
+        case corner(ShapeAnnotation, PDFPage, fixed: NSPoint, original: NSRect)
     }
 
     private var drag: Drag = .none
@@ -123,6 +158,9 @@ final class FolioPDFView: PDFView {
         refreshOverlay()
     }
 
+    /// Le premier clic agit même si la fenêtre n'était pas au premier plan.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     private func ensureOverlayOnTop() {
         if subviews.last !== overlay {
             overlay.removeFromSuperview()
@@ -138,10 +176,28 @@ final class FolioPDFView: PDFView {
             return
         }
         updateFormatBarForSelection()
+        updateShapeBar()
         guard let a = selectedAnnotation, let page = a.page else {
             overlay.isHidden = true
             return
         }
+        if let shape = a as? ShapeAnnotation {
+            if shape.isArrow {
+                overlay.frame = convert(a.bounds, from: page).insetBy(dx: -8, dy: -8)
+                let pts = shape.absolutePoints
+                overlay.endpoints = [pts.first, pts.last].compactMap { $0 }.map { overlay.convert(convert($0, from: page), from: self) }
+                overlay.cornerHandles = false
+            } else {
+                overlay.frame = convert(a.bounds, from: page).insetBy(dx: -6, dy: -6)
+                overlay.endpoints = []
+                overlay.cornerHandles = true
+            }
+            overlay.isHidden = false
+            overlay.needsDisplay = true
+            return
+        }
+        overlay.endpoints = []
+        overlay.cornerHandles = false
         overlay.frame = convert(a.bounds, from: page).insetBy(dx: -3, dy: -3)
         overlay.showsHandle = a.isResizable
         overlay.isHidden = false
@@ -156,8 +212,35 @@ final class FolioPDFView: PDFView {
     // MARK: - Souris
 
     private func hitAnnotation(on page: PDFPage, at p: NSPoint) -> PDFAnnotation? {
+        let tolerance = 6 / max(scaleFactor, 0.1)
         for a in page.annotations.reversed() where a.isUserSelectable {
+            if let shape = a as? ShapeAnnotation {
+                if shape.hitTest(p, tolerance: tolerance) { return shape }
+                continue
+            }
             if a.bounds.insetBy(dx: -3, dy: -3).contains(p) { return a }
+        }
+        return nil
+    }
+
+    /// Poignées des formes : extrémité de flèche (index 0/1) ou coin (point opposé fixe).
+    private func shapeHandle(at vp: NSPoint, on page: PDFPage) -> Drag? {
+        guard let shape = selectedAnnotation as? ShapeAnnotation, shape.page == page else { return nil }
+        func near(_ p: NSPoint) -> Bool {
+            let v = convert(p, from: page)
+            return hypot(v.x - vp.x, v.y - vp.y) < 10
+        }
+        if shape.isArrow {
+            let pts = shape.absolutePoints
+            guard let first = pts.first, let last = pts.last else { return nil }
+            if near(last) { return .endpoint(shape, page, index: 1, oldModel: shape.model, oldBounds: shape.bounds, original: pts) }
+            if near(first) { return .endpoint(shape, page, index: 0, oldModel: shape.model, oldBounds: shape.bounds, original: pts) }
+            return nil
+        }
+        let b = shape.bounds
+        let corners = [NSPoint(x: b.minX, y: b.minY), NSPoint(x: b.maxX, y: b.minY), NSPoint(x: b.minX, y: b.maxY), NSPoint(x: b.maxX, y: b.maxY)]
+        for (i, c) in corners.enumerated() where near(c) {
+            return .corner(shape, page, fixed: corners[3 - i], original: b)
         }
         return nil
     }
@@ -174,13 +257,15 @@ final class FolioPDFView: PDFView {
             return
         }
         let pp = convert(vp, to: page)
+        DebugLog.write("mouseDown tool=\(tool) clicks=\(event.clickCount) page=\(document?.index(for: page) ?? -1) pt=\(Int(pp.x)),\(Int(pp.y)) sous le pointeur=\(page.annotations.filter { $0.bounds.contains(pp) }.map { "\($0.kind)/\(type(of: $0)) \(Int($0.bounds.minX)),\(Int($0.bounds.minY)) \(Int($0.bounds.width))x\(Int($0.bounds.height))" }) hit=\(hitAnnotation(on: page, at: pp).map { $0.kind } ?? "aucun") editeur=\(textEditor != nil)")
         if textEditor != nil {
             endTextEditing()
             return
         }
         window?.makeFirstResponder(self)
 
-        if tool != .select && tool != .ink, let a = hitAnnotation(on: page, at: pp), a.isMovable {
+        let drawingTools: [Tool] = [.select, .ink, .rect, .oval, .arrow]
+        if !drawingTools.contains(tool), let a = hitAnnotation(on: page, at: pp), a.isMovable {
             host?.pdfViewWantsTool(.select)
             select(a)
             if event.clickCount == 2 { editContents(of: a); return }
@@ -191,6 +276,10 @@ final class FolioPDFView: PDFView {
 
         switch tool {
         case .select:
+            if let handle = shapeHandle(at: vp, on: page) {
+                drag = handle
+                return
+            }
             if let a = selectedAnnotation, a.page == page, a.isResizable, hitsHandle(a, on: page, viewPoint: vp) {
                 drag = .resize(a, page, original: a.bounds)
                 return
@@ -240,7 +329,28 @@ final class FolioPDFView: PDFView {
 
     override func mouseDragged(with event: NSEvent) {
         let vp = convert(event.locationInWindow, from: nil)
+        shiftDown = event.modifierFlags.contains(.shift)
         switch drag {
+        case let .endpoint(shape, page, index, _, _, original):
+            var p = convert(vp, to: page)
+            var pts = original
+            if shape.model.style.route == .curve && pts.count > 2 {
+                pts = ShapeGeometry.remap(original, moving: index, to: p)
+            } else {
+                if shiftDown, let other = index == 0 ? original.last : original.first { p = ShapeGeometry.snap(p, from: other) }
+                if index == 0 { pts[0] = p } else { pts[pts.count - 1] = p }
+            }
+            shape.setAbsolutePoints(pts)
+            repaint(page)
+            refreshOverlay()
+
+        case let .corner(shape, page, fixed, _):
+            let p = convert(vp, to: page)
+            let r = NSRect(x: min(p.x, fixed.x), y: min(p.y, fixed.y), width: max(abs(p.x - fixed.x), 10), height: max(abs(p.y - fixed.y), 10))
+            shape.bounds = r
+            repaint(page)
+            refreshOverlay()
+
         case .none:
             super.mouseDragged(with: event)
 
@@ -250,7 +360,7 @@ final class FolioPDFView: PDFView {
             r.origin.x += p.x - start.x
             r.origin.y += p.y - start.y
             a.bounds = r
-            annotationsChanged(on: page)
+            repaint(page)
             refreshOverlay()
 
         case let .resize(a, page, original):
@@ -263,17 +373,27 @@ final class FolioPDFView: PDFView {
                 h = original.height * s
             }
             AnnotationGeometry.setBounds(a, to: NSRect(x: original.minX, y: original.maxY - h, width: w, height: h))
-            annotationsChanged(on: page)
+            repaint(page)
             refreshOverlay()
 
         case .shape(let page, var points, let preview):
             let p = convert(vp, to: page)
-            if tool == .ink { points.append(p) } else { points = [points[0], p] }
-            if let preview { page.removeAnnotation(preview) }
+            let freehand = tool == .ink || (tool == .arrow && ShapeStyle.lastArrow.route == .curve)
+            if freehand { points.append(p) } else { points = [points[0], p] }
             let next = makeShape(points)
-            if let next { page.addAnnotation(next) }
-            annotationsChanged(on: page)
-            drag = .shape(page, points: points, preview: next)
+            if let current = preview as? ShapeAnnotation, let updated = next as? ShapeAnnotation {
+                // Aperçu mis à jour sur place (évite les traces laissées par le cache de PDFKit)
+                current.model = updated.model
+                current.bounds = updated.bounds
+                current.shouldDisplay = true
+                repaint(page)
+                drag = .shape(page, points: points, preview: current)
+            } else {
+                if let preview { discard(preview, from: page) }
+                if let next { page.addAnnotation(next) }
+                repaint(page)
+                drag = .shape(page, points: points, preview: next)
+            }
         }
     }
 
@@ -281,6 +401,17 @@ final class FolioPDFView: PDFView {
         let finished = drag
         drag = .none
         switch finished {
+        case let .endpoint(shape, page, _, oldModel, oldBounds, _):
+            let newModel = shape.model, newBounds = shape.bounds
+            if newModel != oldModel || newBounds != oldBounds {
+                shape.model = oldModel
+                shape.bounds = oldBounds
+                setShapeModel(shape, newModel, bounds: newBounds, on: page, actionName: "Modifier la flèche")
+            }
+
+        case let .corner(shape, page, _, original):
+            if shape.bounds != original { registerBoundsUndo(shape, on: page, restoreTo: original, actionName: "Redimensionner") }
+
         case .none:
             super.mouseUp(with: event)
             if tool.isMarkup { applyMarkup() }
@@ -292,7 +423,7 @@ final class FolioPDFView: PDFView {
             if a.bounds != original { registerBoundsUndo(a, on: page, restoreTo: original, actionName: "Redimensionner") }
 
         case let .shape(page, points, preview):
-            if let preview { page.removeAnnotation(preview) }
+            if let preview { discard(preview, from: page) }
             if let a = makeShape(points) {
                 insert(a, on: page, actionName: tool.title)
                 if tool != .ink {
@@ -309,6 +440,10 @@ final class FolioPDFView: PDFView {
         let vp = convert(event.locationInWindow, from: nil)
         if tool != .ink, let page = page(for: vp, nearest: false) {
             let pp = convert(vp, to: page)
+            if shapeHandle(at: vp, on: page) != nil {
+                NSCursor.crosshair.set()
+                return
+            }
             if let a = selectedAnnotation, a.page == page, a.isResizable, hitsHandle(a, on: page, viewPoint: vp) {
                 NSCursor.crosshair.set()
                 return
@@ -327,6 +462,7 @@ final class FolioPDFView: PDFView {
     }
 
     override func keyDown(with event: NSEvent) {
+        DebugLog.write("keyDown code=\(event.keyCode) sélection=\(selectedAnnotation?.kind ?? "aucune")")
         let isDeleteKey = event.keyCode == 51 || event.keyCode == 117
         if isDeleteKey, let a = selectedAnnotation, let page = a.page {
             remove(a, from: page, actionName: "Supprimer l'annotation")
@@ -352,12 +488,29 @@ final class FolioPDFView: PDFView {
         switch tool {
         case .ink:
             return AnnotationFactory.ink(strokes: [points], color: color, width: lineWidth)
-        case .rect:
-            return AnnotationFactory.shape(.square, from: first, to: last, color: color, width: lineWidth)
-        case .oval:
-            return AnnotationFactory.shape(.circle, from: first, to: last, color: color, width: lineWidth)
+        case .rect, .oval:
+            var end = last
+            if shiftDown {
+                let side = max(abs(last.x - first.x), abs(last.y - first.y))
+                end = NSPoint(x: first.x + (last.x >= first.x ? side : -side), y: first.y + (last.y >= first.y ? side : -side))
+            }
+            let r = NSRect(x: min(first.x, end.x), y: min(first.y, end.y), width: abs(end.x - first.x), height: abs(end.y - first.y))
+            guard r.width > 3, r.height > 3 else { return nil }
+            let style = ShapeStyle.lastShape
+            let model = ShapeModel(kind: tool == .rect ? .rect : .ellipse, style: style)
+            return ShapeAnnotation(model: model, bounds: r.insetBy(dx: -(style.width / 2 + 1), dy: -(style.width / 2 + 1)))
         case .arrow:
-            return AnnotationFactory.arrow(from: first, to: last, color: color, width: lineWidth)
+            let style = ShapeStyle.lastArrow
+            var pts: [CGPoint]
+            if style.route == .curve {
+                pts = ShapeGeometry.simplify(points, tolerance: 1.5)
+            } else {
+                pts = [first, shiftDown ? ShapeGeometry.snap(last, from: first) : last]
+            }
+            guard pts.count >= 2, let a = pts.first, let b = pts.last, hypot(b.x - a.x, b.y - a.y) > 6 else { return nil }
+            let shape = ShapeAnnotation(model: ShapeModel(kind: .arrow, style: style), bounds: .zero)
+            shape.setAbsolutePoints(pts)
+            return shape
         default:
             return nil
         }
@@ -495,7 +648,28 @@ final class FolioPDFView: PDFView {
                     self?.setColor(entry.color, of: a, on: page)
                 })
             }
-            if a.kind != "Stamp" { menu.addItem(MenuAction.submenu("Couleur", colors)) }
+            if a.kind != "Stamp" || a is ShapeAnnotation {
+                menu.addItem(MenuAction.submenu(a is ShapeAnnotation ? "Couleur du contour" : "Couleur", colors))
+            }
+            if let shape = a as? ShapeAnnotation, !shape.isArrow, let page = shape.page {
+                let fills = NSMenu()
+                fills.addItem(MenuAction.item("Aucun") { [weak self] in
+                    var m = shape.model
+                    m.style.fill = nil
+                    self?.setShapeModel(shape, m, on: page, actionName: "Fond")
+                })
+                for entry in Palette.colors {
+                    fills.addItem(MenuAction.item(entry.name, image: Palette.swatch(entry.color)) { [weak self] in
+                        var m = shape.model
+                        m.style.fill = RGBA(entry.color)
+                        self?.setShapeModel(shape, m, on: page, actionName: "Fond")
+                    })
+                }
+                menu.addItem(MenuAction.submenu("Couleur de fond", fills))
+                menu.addItem(MenuAction.item(shape.model.text.isEmpty ? "Écrire dans la forme" : "Modifier le texte de la forme") { [weak self] in
+                    self?.beginShapeTextEditing(shape, on: page)
+                })
+            }
             menu.addItem(MenuAction.item("Supprimer l'annotation") { [weak self] in
                 guard let page = a.page else { return }
                 self?.remove(a, from: page, actionName: "Supprimer l'annotation")
@@ -528,6 +702,10 @@ final class FolioPDFView: PDFView {
     // MARK: - Modification
 
     private func editContents(of a: PDFAnnotation) {
+        if let shape = a as? ShapeAnnotation {
+            if !shape.isArrow, let page = shape.page { beginShapeTextEditing(shape, on: page) }
+            return
+        }
         if a.kind == "FreeText", let page = a.page {
             beginTextEditing(a, on: page, isNew: false)
             return
@@ -558,6 +736,12 @@ final class FolioPDFView: PDFView {
     }
 
     private func setColor(_ c: NSColor, of a: PDFAnnotation, on page: PDFPage) {
+        if let shape = a as? ShapeAnnotation {
+            var m = shape.model
+            m.style.stroke = RGBA(c)
+            setShapeModel(shape, m, on: page, actionName: "Couleur du contour")
+            return
+        }
         let old = a.displayColor
         switch a.kind {
         case "FreeText": a.fontColor = c
@@ -572,18 +756,132 @@ final class FolioPDFView: PDFView {
         undoManager?.setActionName("Couleur")
     }
 
+    /// Retire une annotation temporaire sans laisser de trace à l'écran.
+    func discard(_ a: PDFAnnotation, from page: PDFPage) {
+        a.shouldDisplay = false
+        annotationsChanged(on: page)
+        page.removeAnnotation(a)
+        repaint(page)
+    }
+
+    /// Force le rafraîchissement de la page (PDFKit garde parfois un rendu en cache).
+    func repaint(_ page: PDFPage) {
+        annotationsChanged(on: page)
+        if let dv = documentView { dv.setNeedsDisplay(dv.bounds) }
+        for v in documentView?.subviews ?? [] { v.setNeedsDisplay(v.bounds) }
+        setNeedsDisplay(bounds)
+    }
+
+    // MARK: - Formes
+
+    /// Applique un nouveau modèle à une forme (annulable).
+    func setShapeModel(_ shape: ShapeAnnotation, _ m: ShapeModel, bounds: NSRect? = nil, on page: PDFPage, actionName: String = "Modifier la forme") {
+        let oldModel = shape.model, oldBounds = shape.bounds
+        if let bounds {
+            shape.model = m
+            shape.bounds = bounds
+        } else if m.kind == .arrow {
+            let abs = m.points.map { CGPoint(x: $0.x + oldBounds.minX, y: $0.y + oldBounds.minY) }
+            shape.model = m
+            shape.setAbsolutePoints(abs)
+        } else {
+            shape.model = m
+        }
+        shape.shouldDisplay = false
+        annotationsChanged(on: page)
+        shape.shouldDisplay = true
+        repaint(page)
+        refreshOverlay()
+        undoManager?.registerUndo(withTarget: self) { v in
+            v.setShapeModel(shape, oldModel, bounds: oldBounds, on: page, actionName: actionName)
+        }
+        undoManager?.setActionName(actionName)
+    }
+
+    /// Barre « forme » : quand une forme est sélectionnée, ou quand un outil forme est actif.
+    func updateShapeBar() {
+        let selectedShape = selectedAnnotation as? ShapeAnnotation
+        let toolKind: ShapeKind? = tool == .rect ? .rect : (tool == .oval ? .ellipse : (tool == .arrow ? .arrow : nil))
+        guard textEditor == nil, selectedShape != nil || (toolKind != nil && selectedAnnotation == nil) else {
+            if shapeBar.superview != nil { shapeBar.removeFromSuperview() }
+            return
+        }
+        shapeBar.onChange = { [weak self] style in self?.shapeStyleChanged(style) }
+        shapeBar.onEditText = { [weak self] in
+            guard let self, let s = self.selectedAnnotation as? ShapeAnnotation, let page = s.page else { return }
+            self.beginShapeTextEditing(s, on: page)
+        }
+        if let shape = selectedShape, let page = shape.page {
+            shapeBar.configure(shape.model.style, kind: shape.model.kind, canEditText: true)
+            if shapeBar.superview !== self || subviews.last !== shapeBar {
+                shapeBar.removeFromSuperview()
+                addSubview(shapeBar)
+            }
+            positionBar(shapeBar, around: convert(shape.bounds, from: page))
+        } else if let kind = toolKind {
+            shapeBar.configure(kind == .arrow ? ShapeStyle.lastArrow : ShapeStyle.lastShape, kind: kind, canEditText: false)
+            if shapeBar.superview !== self {
+                addSubview(shapeBar)
+            }
+            positionBar(shapeBar, around: nil)
+        }
+    }
+
+    private func shapeStyleChanged(_ style: ShapeStyle) {
+        if let shape = selectedAnnotation as? ShapeAnnotation, let page = shape.page {
+            var m = shape.model
+            m.style = style
+            setShapeModel(shape, m, on: page)
+            if shape.isArrow { ShapeStyle.lastArrow = style } else { ShapeStyle.lastShape = style }
+        } else if tool == .arrow {
+            ShapeStyle.lastArrow = style
+        } else {
+            ShapeStyle.lastShape = style
+        }
+        host?.pdfViewSelectionChanged(selectedAnnotation)
+    }
+
+    /// Place une barre flottante au-dessus d'un rectangle (ou en haut de la vue si aucun).
+    func positionBar(_ bar: NSView, around r: NSRect?) {
+        let size = bar.fittingSize
+        let gap: CGFloat = 8
+        guard let r else {
+            let x = max(8, (bounds.width - size.width) / 2)
+            let y = isFlipped ? 10 : bounds.height - size.height - 10
+            bar.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+            return
+        }
+        let x = min(max(8, r.minX), max(8, bounds.width - size.width - 8))
+        var y: CGFloat
+        if isFlipped {
+            y = r.minY - gap - size.height
+            if y < 8 { y = r.maxY + gap }
+        } else {
+            y = r.maxY + gap
+            if y + size.height > bounds.height - 8 { y = r.minY - gap - size.height }
+        }
+        bar.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
     // MARK: - Ajout / suppression avec annulation
 
     func insert(_ a: PDFAnnotation, on page: PDFPage, actionName: String) {
+        a.shouldDisplay = true
         page.addAnnotation(a)
-        annotationsChanged(on: page)
+        repaint(page)
         undoManager?.registerUndo(withTarget: self) { v in v.remove(a, from: page, actionName: actionName) }
         undoManager?.setActionName(actionName)
     }
 
     func remove(_ a: PDFAnnotation, from page: PDFPage, actionName: String) {
         if selectedAnnotation === a { select(nil) }
+        let before = page.annotations.count
+        // Contournement PDFKit : masquer avant de retirer, sinon l'ancien rendu reste affiché.
+        a.shouldDisplay = false
+        annotationsChanged(on: page)
         page.removeAnnotation(a)
+        repaint(page)
+        DebugLog.write("remove \(a.kind)/\(type(of: a)) : \(before) -> \(page.annotations.count) annotations ; encore présente=\(page.annotations.contains { $0 === a })")
         annotationsChanged(on: page)
         undoManager?.registerUndo(withTarget: self) { v in v.insert(a, on: page, actionName: actionName) }
         undoManager?.setActionName(actionName)

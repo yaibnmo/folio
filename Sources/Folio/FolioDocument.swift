@@ -35,6 +35,7 @@ final class FolioDocument: NSDocument {
             throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadCorruptFileError,
                           userInfo: [NSLocalizedDescriptionKey: "Ce fichier n'est pas un PDF lisible."])
         }
+        ShapeAnnotation.restore(in: doc)
         pdf = doc
     }
 

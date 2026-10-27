@@ -40,6 +40,8 @@ Clic droit sur un PDF → **Lire les informations** → **Ouvrir avec : Folio** 
 | **Accueil** | Fichiers récents avec miniatures, fichiers épinglés, filtre, glisser-déposer |
 | **Lecture** | Vignettes, zoom, une ou deux pages, plein écran, recherche avec compteur, aller à la page, impression |
 | **Annotations** | Surligner, souligner, barrer, notes, dessin à main levée, rectangle, ellipse, flèche ; couleur et épaisseur au choix |
+| **Formes** | Rectangle (coins droits ou arrondis) et ellipse : couleur, épaisseur et type de contour (continu, tirets, pointillés), fond coloré, texte à l'intérieur (double-clic), redimensionnement par les 4 coins |
+| **Flèches** | Droites, coudées à 1 ou 2 angles droits, ou courbes à main levée ; épaisseur, contour, extrémités au choix à chaque bout (flèche, flèche pleine, rond, carré, losange, barre) pour les doubles flèches ; on les étire par l'une ou l'autre extrémité |
 | **Zones de texte** | Tapées directement sur la page, avec une barre de mise en forme : police, taille, gras, italique, couleur, alignement, fond |
 | **Clic droit** | Sur du texte : surligner (avec couleurs), souligner, barrer, note, copier. Sur une page : favori, note, texte, signer ici |
 | **Signatures** | Signature manuscrite dessinée + nom en écriture cursive (6 polices), posables seules ou combinées (nom dessous ou côte à côte) |
@@ -63,6 +65,7 @@ Un clic sur une annotation (zone de texte, signature, forme…) la sélectionne,
 | Barre latérale | ⌥⌘S |
 | Supprimer l'annotation sélectionnée | ⌫ |
 | Revenir à l'outil Sélection | Échap |
+| Flèche à 45° / carré ou cercle parfait | ⇧ pendant le tracé |
 
 ## Configuration requise
 

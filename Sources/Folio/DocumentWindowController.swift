@@ -197,6 +197,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = "Zoom"
             item.view = seg
+            item.visibilityPriority = .low
             return item
 
         case Item.tools:
@@ -211,6 +212,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             let item = NSToolbarItem(itemIdentifier: id)
             item.label = "Outils"
             item.view = seg
+            item.visibilityPriority = .high
             return item
 
         case Item.color:
@@ -224,6 +226,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             item.label = "Couleur"
             item.toolTip = "Couleur de l'outil ou de l'annotation sélectionnée"
             item.view = well
+            item.visibilityPriority = .high
             return item
 
         case Item.size:
@@ -237,6 +240,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             item.label = "Taille"
             item.toolTip = "Épaisseur du trait et taille du texte"
             item.view = pop
+            item.visibilityPriority = .high
             return item
 
         case Item.search:

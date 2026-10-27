@@ -151,6 +151,8 @@ private final class FileRowView: NSView {
         return bounds.contains(local) ? self : nil
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {}
 
     override func mouseUp(with event: NSEvent) {
