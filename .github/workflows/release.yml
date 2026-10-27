@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fabriquer Folio.app, Folio.dmg et Folio.zip
+        run: ./scripts/package.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Conserver les fichiers
+        uses: actions/upload-artifact@v4
+        with:
+          name: Folio
+          path: |
+            dist/Folio.dmg
+            dist/Folio.zip
+
+      - name: Publier la release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Folio.dmg
+            dist/Folio.zip
+          generate_release_notes: true
