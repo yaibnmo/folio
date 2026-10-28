@@ -52,6 +52,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         window.minSize = NSSize(width: 640, height: 420)
         window.toolbarStyle = .unified
         window.tabbingIdentifier = "FolioDocument"
+        window.tabbingMode = .preferred
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -468,6 +469,19 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     func searchFieldDidEndSearching(_ sender: NSSearchField) {
         clearSearch()
+    }
+
+    // MARK: - Onglets
+
+    /// Bouton « + » de la barre d'onglets (et ⌘T) : ouvrir un ou plusieurs PDF dans de nouveaux onglets.
+    @objc override func newWindowForTab(_ sender: Any?) {
+        NSDocumentController.shared.openDocument(sender)
+    }
+
+    /// La barre d'onglets reste visible, même avec un seul PDF ouvert (comme un navigateur).
+    func showTabBarIfNeeded() {
+        guard let window, let group = window.tabGroup, !group.isTabBarVisible else { return }
+        window.toggleTabBar(nil)
     }
 
     // MARK: - Favoris

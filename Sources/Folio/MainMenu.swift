@@ -45,6 +45,7 @@ enum MainMenu {
     private static func fileMenu() -> NSMenu {
         let m = NSMenu(title: "Fichier")
         m.addItem(item("Accueil", "showHome:", "h", [.command, .shift]))
+        m.addItem(item("Nouvel onglet…", "newWindowForTab:", "t"))
         m.addItem(item("Ouvrir…", "openDocument:", "o"))
         // NSDocumentController remplit automatiquement le sous-menu qui contient « clearRecentDocuments: ».
         let recent = NSMenu(title: "Ouvrir l'élément récent")

@@ -38,6 +38,7 @@ Clic droit sur un PDF → **Lire les informations** → **Ouvrir avec : Folio** 
 | | |
 |---|---|
 | **Accueil** | Fichiers récents avec miniatures, fichiers épinglés, filtre, glisser-déposer |
+| **Onglets** | Tous les PDF s'ouvrent en onglets dans une seule fenêtre, comme un navigateur ; bouton « + » (ou ⌘T) pour en ajouter |
 | **Lecture** | Vignettes, zoom, une ou deux pages, plein écran, recherche avec compteur, aller à la page, impression |
 | **Annotations** | Surligner, souligner, barrer, notes, dessin à main levée, rectangle, ellipse, flèche ; couleur et épaisseur au choix |
 | **Formes** | Rectangle (coins droits ou arrondis) et ellipse : couleur, épaisseur et type de contour (continu, tirets, pointillés), fond coloré, texte à l'intérieur (double-clic), redimensionnement par les 4 coins |
@@ -57,6 +58,7 @@ Un clic sur une annotation (zone de texte, signature, forme…) la sélectionne,
 |---|---|
 | Accueil | ⇧⌘H |
 | Ouvrir | ⌘O |
+| Nouvel onglet (ouvrir un PDF) | ⌘T |
 | Enregistrer / Enregistrer sous | ⌘S / ⇧⌘S |
 | Outils : sélection, surligner, souligner, barrer, note, texte, dessin, rectangle | ⌘1 … ⌘8 |
 | Rechercher / suivant / précédent | ⌘F / ⌘G / ⇧⌘G |

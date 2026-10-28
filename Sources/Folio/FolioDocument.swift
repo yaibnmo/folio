@@ -16,6 +16,7 @@ final class FolioDocument: NSDocument {
     override func showWindows() {
         super.showWindows()
         guard let wc = windowControllers.first as? DocumentWindowController else { return }
+        wc.showTabBarIfNeeded()
         if !wc.unlockIfNeeded() {
             DispatchQueue.main.async { self.close() }
         }
