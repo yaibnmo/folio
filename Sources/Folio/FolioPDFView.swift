@@ -2,6 +2,7 @@ import AppKit
 import PDFKit
 
 protocol FolioPDFViewHost: AnyObject {
+    func pdfViewDidModify(pageIndex: Int)
     func pdfViewWantsTool(_ tool: Tool)
     func pdfViewSelectionChanged(_ annotation: PDFAnnotation?)
     func pdfViewWantsSignatureManager()
@@ -767,6 +768,7 @@ final class FolioPDFView: PDFView {
     /// Force le rafraîchissement de la page (PDFKit garde parfois un rendu en cache).
     func repaint(_ page: PDFPage) {
         annotationsChanged(on: page)
+        if let i = document?.index(for: page) { host?.pdfViewDidModify(pageIndex: i) }
         if let dv = documentView { dv.setNeedsDisplay(dv.bounds) }
         for v in documentView?.subviews ?? [] { v.setNeedsDisplay(v.bounds) }
         setNeedsDisplay(bounds)

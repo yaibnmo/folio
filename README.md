@@ -39,7 +39,7 @@ Clic droit sur un PDF → **Lire les informations** → **Ouvrir avec : Folio** 
 |---|---|
 | **Accueil** | Fichiers récents avec miniatures, fichiers épinglés, filtre, glisser-déposer |
 | **Onglets** | Tous les PDF s'ouvrent en onglets dans une seule fenêtre, comme un navigateur : × à droite du nom pour fermer (ou clic du milieu), « + » après le dernier onglet (ou ⌘T) pour en ajouter, ⌃⇥ / ⌃⇧⇥ pour passer de l'un à l'autre |
-| **Volet latéral** | Vignettes et favoris ; se réduit depuis son icône (ou ⌥⌘S), puis se rouvre d'un clic grâce au petit bouton flottant en haut à gauche du PDF ; bouton de la barre d'outils toujours visible, même en demi-écran |
+| **Volet latéral** | Vignettes ajustées à la largeur du volet (portrait ou paysage), centrées, défilement vertical uniquement, avec un signet en haut à droite de chaque page pour la mettre en favoris en 1 clic (rouge = favori), onglet Favoris ; se réduit depuis son icône (ou ⌥⌘S), puis se rouvre d'un clic grâce au petit bouton flottant en haut à gauche du PDF ; bouton de la barre d'outils toujours visible, même en demi-écran |
 | **Lecture** | Vignettes, zoom, une ou deux pages, plein écran, recherche avec compteur, aller à la page, impression |
 | **Annotations** | Surligner, souligner, barrer, notes, dessin à main levée, rectangle, ellipse, flèche ; couleur et épaisseur au choix |
 | **Formes** | Rectangle (coins droits ou arrondis) et ellipse : couleur, épaisseur et type de contour (continu, tirets, pointillés), fond coloré, texte à l'intérieur (double-clic), redimensionnement par les 4 coins |
@@ -47,7 +47,7 @@ Clic droit sur un PDF → **Lire les informations** → **Ouvrir avec : Folio** 
 | **Zones de texte** | Tapées directement sur la page, avec une barre de mise en forme : police, taille, gras, italique, couleur, alignement, fond |
 | **Clic droit** | Sur du texte : surligner (avec couleurs), souligner, barrer, note, copier. Sur une page : favori, note, texte, signer ici |
 | **Signatures** | Signature manuscrite dessinée + nom en écriture cursive (6 polices), posables seules ou combinées (nom dessous ou côte à côte) |
-| **Favoris** | Pages favorites par document (⌘D), listées dans la barre latérale |
+| **Favoris** | Pages favorites par document (signet de la vignette ou ⌘D), affichées en aperçu dans l'onglet Favoris du volet : un clic mène à la page |
 | **Formulaires** | Remplissage des formulaires PDF classiques |
 | **Compatibilité** | Annotations enregistrées au format PDF standard : visibles dans Acrobat, Aperçu, navigateurs… |
 

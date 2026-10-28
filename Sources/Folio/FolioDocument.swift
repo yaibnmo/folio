@@ -19,6 +19,7 @@ final class FolioDocument: NSDocument {
             return
         }
         TabManager.shared.add(wc)
+        DispatchQueue.main.async { wc.ensureSidebarWidth() }
         if !wc.unlockIfNeeded() {
             DispatchQueue.main.async { self.close() }
         }

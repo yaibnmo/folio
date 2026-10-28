@@ -7,13 +7,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     NSTableViewDataSource, NSTableViewDelegate {
 
     let pdfView = FolioPDFView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
-    private let thumbnails = PDFThumbnailView(frame: NSRect(x: 0, y: 0, width: 160, height: 700))
+    private let thumbnails = PageListView(frame: NSRect(x: 0, y: 0, width: 160, height: 700))
     private let split = NSSplitView(frame: NSRect(x: 0, y: 0, width: 1100, height: 760))
     private let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 700))
     private let sidebarSwitch = NSSegmentedControl(labels: ["Vignettes", "Favoris"], trackingMode: .selectOne, target: nil, action: nil)
-    private let favoritesScroll = NSScrollView()
-    private let favoritesTable = NSTableView()
-    private let favoritesEmpty = NSTextField(wrappingLabelWithString: "Aucune page favorite.\n\nClic droit sur une page → « Ajouter aux favoris », ou ⌘D.")
+    /// Onglet Favoris : mêmes vignettes que l'onglet Vignettes, limitées aux pages favorites.
+    private let favoritesScroll = PageListView(frame: NSRect(x: 0, y: 0, width: 160, height: 700))
+    private let favoritesEmpty = NSTextField(wrappingLabelWithString: "Aucune page favorite.\n\nCliquez sur le signet d'une vignette, clic droit sur une page → « Ajouter aux favoris », ou ⌘D.")
     private var favoritePages: [Int] = []
     private var subtitleTimer: Timer?
     let tabStrip = TabStripView(frame: .zero)
@@ -95,9 +95,13 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         pdfView.backgroundColor = .underPageBackgroundColor
         pdfView.document = pdf
 
+        thumbnails.isFavorite = { [weak self] i in self?.pdfViewIsFavorite(pageIndex: i) ?? false }
+        thumbnails.onToggleFavorite = { [weak self] i in self?.pdfViewToggleFavorite(pageIndex: i) }
         thumbnails.pdfView = pdfView
-        thumbnails.thumbnailSize = NSSize(width: 110, height: 140)
-        thumbnails.backgroundColor = .windowBackgroundColor
+        favoritesScroll.pages = []
+        favoritesScroll.isFavorite = { [weak self] i in self?.pdfViewIsFavorite(pageIndex: i) ?? false }
+        favoritesScroll.onToggleFavorite = { [weak self] i in self?.pdfViewToggleFavorite(pageIndex: i) }
+        favoritesScroll.pdfView = pdfView
         buildSidebar()
 
         split.isVertical = true
@@ -120,21 +124,6 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         sidebarSwitch.target = self
         sidebarSwitch.action = #selector(sidebarSwitched(_:))
 
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("favorite"))
-        favoritesTable.addTableColumn(column)
-        favoritesTable.headerView = nil
-        favoritesTable.rowHeight = 46
-        favoritesTable.dataSource = self
-        favoritesTable.delegate = self
-        favoritesTable.target = self
-        favoritesTable.action = #selector(favoriteClicked(_:))
-        favoritesTable.style = .sourceList
-        let tableMenu = NSMenu()
-        tableMenu.addItem(withTitle: "Retirer des favoris", action: #selector(removeClickedFavorite(_:)), keyEquivalent: "").target = self
-        favoritesTable.menu = tableMenu
-        favoritesScroll.documentView = favoritesTable
-        favoritesScroll.hasVerticalScroller = true
-        favoritesScroll.drawsBackground = false
         favoritesScroll.isHidden = true
 
         favoritesEmpty.alignment = .center
@@ -214,7 +203,16 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     private func updateFloatingExpand() {
         let collapsed = sidebar.superview == nil
-        floatingExpand.isHidden = !collapsed
+        if collapsed {
+            floatingExpand.alphaValue = 0
+            floatingExpand.isHidden = false
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                floatingExpand.animator().alphaValue = 1
+            }
+        } else {
+            floatingExpand.isHidden = true
+        }
         if collapsed, pdfView.subviews.last !== floatingExpand {
             // reste au-dessus des vues internes de PDFKit
             floatingExpand.removeFromSuperview()
@@ -400,6 +398,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     // MARK: - FolioPDFViewHost
 
+    func pdfViewDidModify(pageIndex: Int) {
+        thumbnails.invalidate(pageIndex: pageIndex)
+        favoritesScroll.invalidate(pageIndex: pageIndex)
+    }
+
     func pdfViewWantsSignatureManager() {
         showSignatureManager(completion: nil)
     }
@@ -438,23 +441,58 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     // MARK: - Affichage
 
+    private var sidebarWidth: CGFloat = 170
+    private var sidebarAnimating = false
+
+    /// Ouvre / ferme le volet avec une courte animation (le séparateur est retiré une fois fermé).
     @objc func toggleThumbnails(_ sender: Any?) {
-        // On retire complètement le volet (et donc le séparateur) au lieu de le masquer :
-        // sinon NSSplitView continue de dessiner la ligne de séparation sur le bord du PDF.
+        guard !sidebarAnimating else { return }
         if sidebar.superview != nil {
-            split.removeArrangedSubview(sidebar)
-            sidebar.removeFromSuperview()
-            sidebar.isHidden = true
-            split.adjustSubviews()
+            sidebarWidth = max(130, sidebar.frame.width)
+            animateSidebar(from: sidebar.frame.width, to: 0) { [weak self] in
+                guard let self else { return }
+                self.split.removeArrangedSubview(self.sidebar)
+                self.sidebar.removeFromSuperview()
+                self.sidebar.isHidden = true
+                self.split.adjustSubviews()
+                self.split.needsDisplay = true
+                self.updateFloatingExpand()
+            }
         } else {
             sidebar.isHidden = false
             split.insertArrangedSubview(sidebar, at: 0)
             split.adjustSubviews()
-            split.setPosition(170, ofDividerAt: 0)
+            sidebarAnimating = true
+            split.setPosition(0, ofDividerAt: 0)
+            updateFloatingExpand()
+            animateSidebar(from: 0, to: sidebarWidth) { [weak self] in
+                self?.split.needsDisplay = true
+            }
         }
-        split.needsDisplay = true
-        pdfView.needsDisplay = true
-        updateFloatingExpand()
+    }
+
+    /// À l'ouverture d'un PDF, le volet garde une largeur confortable.
+    func ensureSidebarWidth() {
+        guard sidebar.superview != nil, sidebar.frame.width < 150 else { return }
+        split.setPosition(170, ofDividerAt: 0)
+    }
+
+    private func animateSidebar(from start: CGFloat, to end: CGFloat, completion: @escaping () -> Void) {
+        sidebarAnimating = true
+        let duration = 0.24
+        let t0 = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] t in
+            guard let self else { t.invalidate(); return }
+            let p = min(1, (ProcessInfo.processInfo.systemUptime - t0) / duration)
+            let eased = 1 - pow(1 - p, 3)   // ralentit en fin de course
+            self.split.setPosition(start + (end - start) * CGFloat(eased), ofDividerAt: 0)
+            if p >= 1 {
+                t.invalidate()
+                self.sidebarAnimating = false
+                completion()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
@@ -603,42 +641,11 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     private func reloadFavorites() {
         let count = pdfView.document?.pageCount ?? 0
         favoritePages = fileURL.map { LibraryStore.shared.favoritePages(for: $0) }?.filter { $0 < count } ?? []
-        favoritesTable.reloadData()
+        favoritesScroll.pages = favoritePages
+        favoritesScroll.reloadFavorites()
+        thumbnails.reloadFavorites()
         sidebarSwitch.setLabel(favoritePages.isEmpty ? "Favoris" : "Favoris (\(favoritePages.count))", forSegment: 1)
         updateSidebarVisibility()
-    }
-
-    @objc private func favoriteClicked(_ sender: Any?) {
-        let row = favoritesTable.clickedRow
-        guard favoritePages.indices.contains(row), let page = pdfView.document?.page(at: favoritePages[row]) else { return }
-        pdfView.go(to: page)
-    }
-
-    @objc private func removeClickedFavorite(_ sender: Any?) {
-        let row = favoritesTable.clickedRow
-        guard favoritePages.indices.contains(row) else { return }
-        pdfViewToggleFavorite(pageIndex: favoritePages[row])
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { favoritePages.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let index = favoritePages[row]
-        let title = NSTextField(labelWithString: "★ Page \(index + 1)")
-        title.font = .boldSystemFont(ofSize: 12)
-        let raw = pdfView.document?.page(at: index)?.string ?? ""
-        let snippet = raw.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
-        let detail = NSTextField(labelWithString: snippet)
-        detail.font = .systemFont(ofSize: 11)
-        detail.textColor = .secondaryLabelColor
-        detail.lineBreakMode = .byTruncatingTail
-        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let stack = NSStackView(views: [title, detail])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 2
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
-        return stack
     }
 
     // MARK: - Menus
@@ -670,7 +677,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     // MARK: - Split view
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat,
-                   ofSubviewAt dividerIndex: Int) -> CGFloat { 130 }
+                   ofSubviewAt dividerIndex: Int) -> CGFloat { sidebarAnimating ? 0 : 130 }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat,
                    ofSubviewAt dividerIndex: Int) -> CGFloat { 320 }
@@ -710,6 +717,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         pdfView.document = nil
         pdfView.document = pdf
         thumbnails.pdfView = pdfView
+        favoritesScroll.pdfView = pdfView
         reloadFavorites()
     }
 }
