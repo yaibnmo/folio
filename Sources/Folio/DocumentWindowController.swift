@@ -373,9 +373,25 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     // MARK: - Affichage
 
     @objc func toggleThumbnails(_ sender: Any?) {
-        sidebar.isHidden.toggle()
-        split.adjustSubviews()
-        if !sidebar.isHidden { split.setPosition(170, ofDividerAt: 0) }
+        // On retire complètement le volet (et donc le séparateur) au lieu de le masquer :
+        // sinon NSSplitView continue de dessiner la ligne de séparation sur le bord du PDF.
+        if sidebar.superview != nil {
+            split.removeArrangedSubview(sidebar)
+            sidebar.removeFromSuperview()
+            sidebar.isHidden = true
+            split.adjustSubviews()
+        } else {
+            sidebar.isHidden = false
+            split.insertArrangedSubview(sidebar, at: 0)
+            split.adjustSubviews()
+            split.setPosition(170, ofDividerAt: 0)
+        }
+        split.needsDisplay = true
+        pdfView.needsDisplay = true
+    }
+
+    func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
+        sidebar.superview == nil || sidebar.isHidden
     }
 
     @objc func zoomSegment(_ sender: NSSegmentedControl) {
