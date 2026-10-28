@@ -6,6 +6,7 @@ enum AppState {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
         _ = FolioDocumentController()
         NSApp.mainMenu = MainMenu.build()
     }
@@ -33,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    @objc func selectNextTab(_ sender: Any?) { TabManager.shared.selectNext(1) }
+    @objc func selectPreviousTab(_ sender: Any?) { TabManager.shared.selectNext(-1) }
 
     @objc func showHome(_ sender: Any?) {
         HomeWindowController.shared.show()

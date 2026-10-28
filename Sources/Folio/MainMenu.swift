@@ -128,6 +128,9 @@ enum MainMenu {
         m.addItem(item("Placer dans le Dock", "performMiniaturize:", "m"))
         m.addItem(item("Réduire/agrandir", "performZoom:"))
         m.addItem(.separator())
+        m.addItem(item("Onglet suivant", "selectNextTab:", "\t", .control))
+        m.addItem(item("Onglet précédent", "selectPreviousTab:", "\t", [.control, .shift]))
+        m.addItem(.separator())
         m.addItem(item("Tout ramener au premier plan", "arrangeInFront:"))
         NSApp.windowsMenu = m
         return m

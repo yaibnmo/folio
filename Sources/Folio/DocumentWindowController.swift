@@ -16,6 +16,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let favoritesEmpty = NSTextField(wrappingLabelWithString: "Aucune page favorite.\n\nClic droit sur une page → « Ajouter aux favoris », ou ⌘D.")
     private var favoritePages: [Int] = []
     private var subtitleTimer: Timer?
+    let tabStrip = TabStripView(frame: .zero)
 
     private var currentTool: Tool = .select
     private var toolColors: [Tool: NSColor] = [:]
@@ -51,14 +52,18 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
                               backing: .buffered, defer: false)
         window.minSize = NSSize(width: 640, height: 420)
         window.toolbarStyle = .unified
-        window.tabbingIdentifier = "FolioDocument"
-        window.tabbingMode = .preferred
+        window.tabbingMode = .disallowed   // onglets gérés par Folio (TabManager)
+        window.isRestorable = false
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
         Tool.allCases.forEach { toolColors[$0] = $0.defaultColor }
         buildContent(pdf)
         buildToolbar()
+        let tabsAccessory = NSTitlebarAccessoryViewController()
+        tabsAccessory.view = tabStrip
+        tabsAccessory.layoutAttribute = .bottom
+        window.addTitlebarAccessoryViewController(tabsAccessory)
         window.center()
         _ = window.setFrameAutosaveName("FolioDocumentWindow")
         setTool(.select)
@@ -478,10 +483,14 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         NSDocumentController.shared.openDocument(sender)
     }
 
-    /// La barre d'onglets reste visible, même avec un seul PDF ouvert (comme un navigateur).
-    func showTabBarIfNeeded() {
-        guard let window, let group = window.tabGroup, !group.isTabBarVisible else { return }
-        window.toggleTabBar(nil)
+    func windowWillClose(_ notification: Notification) {
+        TabManager.shared.remove(self)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        if TabManager.shared.active !== self, TabManager.shared.tabs.contains(where: { $0 === self }) {
+            TabManager.shared.select(self)
+        }
     }
 
     // MARK: - Favoris

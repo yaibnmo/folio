@@ -14,12 +14,29 @@ final class FolioDocument: NSDocument {
     }
 
     override func showWindows() {
-        super.showWindows()
-        guard let wc = windowControllers.first as? DocumentWindowController else { return }
-        wc.showTabBarIfNeeded()
+        guard let wc = windowControllers.first as? DocumentWindowController else {
+            super.showWindows()
+            return
+        }
+        TabManager.shared.add(wc)
         if !wc.unlockIfNeeded() {
             DispatchQueue.main.async { self.close() }
         }
+    }
+
+    override func updateChangeCount(_ change: NSDocument.ChangeType) {
+        super.updateChangeCount(change)
+        TabManager.shared.refresh()
+    }
+
+    override var fileURL: URL? {
+        didSet { DispatchQueue.main.async { TabManager.shared.refresh() } }
+    }
+
+    /// Avant une demande d'enregistrement, on affiche l'onglet concerné.
+    override func canClose(withDelegate delegate: Any, shouldClose shouldCloseSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        if let wc = windowControllers.first as? DocumentWindowController { TabManager.shared.select(wc) }
+        super.canClose(withDelegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
     }
 
     override func close() {
