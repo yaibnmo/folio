@@ -17,6 +17,8 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var favoritePages: [Int] = []
     private var subtitleTimer: Timer?
     let tabStrip = TabStripView(frame: .zero)
+    private let collapseButton = NSButton(frame: .zero)
+    private let floatingExpand = NSVisualEffectView(frame: .zero)
 
     private var currentTool: Tool = .select
     private var toolColors: [Tool: NSColor] = [:]
@@ -59,6 +61,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         window.delegate = self
         Tool.allCases.forEach { toolColors[$0] = $0.defaultColor }
         buildContent(pdf)
+        buildFloatingExpand()
         buildToolbar()
         let tabsAccessory = NSTitlebarAccessoryViewController()
         tabsAccessory.view = tabStrip
@@ -139,14 +142,26 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         favoritesEmpty.font = .systemFont(ofSize: 11)
         favoritesEmpty.isHidden = true
 
-        for v in [sidebarSwitch, thumbnails, favoritesScroll, favoritesEmpty] as [NSView] {
+        collapseButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Réduire le volet")
+        collapseButton.isBordered = false
+        collapseButton.bezelStyle = .regularSquare
+        collapseButton.contentTintColor = .secondaryLabelColor
+        collapseButton.toolTip = "Réduire le volet (⌥⌘S)"
+        collapseButton.target = self
+        collapseButton.action = #selector(toggleThumbnails(_:))
+
+        for v in [sidebarSwitch, collapseButton, thumbnails, favoritesScroll, favoritesEmpty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             sidebar.addSubview(v)
         }
         NSLayoutConstraint.activate([
             sidebarSwitch.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 8),
             sidebarSwitch.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 8),
-            sidebarSwitch.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -8),
+            sidebarSwitch.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -6),
+            collapseButton.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -6),
+            collapseButton.centerYAnchor.constraint(equalTo: sidebarSwitch.centerYAnchor),
+            collapseButton.widthAnchor.constraint(equalToConstant: 22),
+            collapseButton.heightAnchor.constraint(equalToConstant: 22),
             thumbnails.topAnchor.constraint(equalTo: sidebarSwitch.bottomAnchor, constant: 6),
             thumbnails.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
             thumbnails.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
@@ -159,6 +174,56 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             favoritesEmpty.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 12),
             favoritesEmpty.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -12),
         ])
+    }
+
+    /// Petit bouton flottant (coin haut-gauche du PDF) pour rouvrir le volet quand il est réduit.
+    private func buildFloatingExpand() {
+        floatingExpand.material = .popover
+        floatingExpand.blendingMode = .withinWindow
+        floatingExpand.state = .active
+        floatingExpand.wantsLayer = true
+        floatingExpand.layer?.cornerRadius = 8
+        floatingExpand.layer?.borderWidth = 0.5
+        floatingExpand.layer?.borderColor = NSColor.separatorColor.cgColor
+        floatingExpand.translatesAutoresizingMaskIntoConstraints = false
+        floatingExpand.isHidden = true
+
+        let button = NSButton(frame: .zero)
+        button.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "Afficher le volet")
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.contentTintColor = .labelColor
+        button.toolTip = "Afficher le volet (⌥⌘S)"
+        button.target = self
+        button.action = #selector(toggleThumbnails(_:))
+        button.translatesAutoresizingMaskIntoConstraints = false
+        floatingExpand.addSubview(button)
+
+        pdfView.addSubview(floatingExpand)
+        NSLayoutConstraint.activate([
+            floatingExpand.leadingAnchor.constraint(equalTo: pdfView.leadingAnchor, constant: 10),
+            floatingExpand.topAnchor.constraint(equalTo: pdfView.topAnchor, constant: 10),
+            floatingExpand.widthAnchor.constraint(equalToConstant: 34),
+            floatingExpand.heightAnchor.constraint(equalToConstant: 30),
+            button.centerXAnchor.constraint(equalTo: floatingExpand.centerXAnchor),
+            button.centerYAnchor.constraint(equalTo: floatingExpand.centerYAnchor),
+            button.widthAnchor.constraint(equalToConstant: 26),
+            button.heightAnchor.constraint(equalToConstant: 22),
+        ])
+    }
+
+    private func updateFloatingExpand() {
+        let collapsed = sidebar.superview == nil
+        floatingExpand.isHidden = !collapsed
+        if collapsed, pdfView.subviews.last !== floatingExpand {
+            // reste au-dessus des vues internes de PDFKit
+            floatingExpand.removeFromSuperview()
+            pdfView.addSubview(floatingExpand)
+            NSLayoutConstraint.activate([
+                floatingExpand.leadingAnchor.constraint(equalTo: pdfView.leadingAnchor, constant: 10),
+                floatingExpand.topAnchor.constraint(equalTo: pdfView.topAnchor, constant: 10),
+            ])
+        }
     }
 
     private func buildToolbar() {
@@ -192,6 +257,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
             item.isBordered = true
             item.target = self
             item.action = #selector(toggleThumbnails(_:))
+            item.visibilityPriority = .user   // toujours visible, même fenêtre étroite
             return item
 
         case Item.zoom:
@@ -388,6 +454,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
         split.needsDisplay = true
         pdfView.needsDisplay = true
+        updateFloatingExpand()
     }
 
     func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
